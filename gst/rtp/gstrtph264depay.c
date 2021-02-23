@@ -83,7 +83,7 @@ G_DEFINE_TYPE (GstRtpH264Depay, gst_rtp_h264_depay,
     GST_TYPE_RTP_BASE_DEPAYLOAD);
 
 
-#define DEFAULT_DROP_SEI_NAL    FALSE
+#define DEFAULT_DROP_SEI_NAL    TRUE
 
 enum
 {
@@ -125,7 +125,7 @@ gst_rtp_h264_depay_class_init (GstRtpH264DepayClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_DROP_SEI_NAL,
       g_param_spec_boolean ("drop-sei-nal", "Drop SEI nal units",
-          "Drop SEI nal units when detected in H.264 stream. Default is false (disabled).",
+          "Drop SEI nal units when detected in H.264 stream. Default is true (enabled).",
           DEFAULT_DROP_SEI_NAL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_add_static_pad_template (gstelement_class,
