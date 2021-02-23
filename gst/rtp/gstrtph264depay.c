@@ -82,6 +82,15 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 G_DEFINE_TYPE (GstRtpH264Depay, gst_rtp_h264_depay,
     GST_TYPE_RTP_BASE_DEPAYLOAD);
 
+
+#define DEFAULT_DROP_SEI_NAL    FALSE
+
+enum
+{
+  PROP_0,
+  PROP_DROP_SEI_NAL
+};
+
 static void gst_rtp_h264_depay_finalize (GObject * object);
 
 static GstStateChangeReturn gst_rtp_h264_depay_change_state (GstElement *
@@ -93,6 +102,10 @@ static gboolean gst_rtp_h264_depay_setcaps (GstRTPBaseDepayload * filter,
     GstCaps * caps);
 static gboolean gst_rtp_h264_depay_handle_event (GstRTPBaseDepayload * depay,
     GstEvent * event);
+static void gst_rtp_h264_depay_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec);
+static void gst_rtp_h264_depay_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec);
 
 static void
 gst_rtp_h264_depay_class_init (GstRtpH264DepayClass * klass)
@@ -106,6 +119,14 @@ gst_rtp_h264_depay_class_init (GstRtpH264DepayClass * klass)
   gstrtpbasedepayload_class = (GstRTPBaseDepayloadClass *) klass;
 
   gobject_class->finalize = gst_rtp_h264_depay_finalize;
+
+  gobject_class->set_property = gst_rtp_h264_depay_set_property;
+  gobject_class->get_property = gst_rtp_h264_depay_get_property;
+
+  g_object_class_install_property (gobject_class, PROP_DROP_SEI_NAL,
+      g_param_spec_boolean ("drop-sei-nal", "Drop SEI nal units",
+          "Drop SEI nal units when detected in H.264 stream. Default is false (disabled).",
+          DEFAULT_DROP_SEI_NAL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_add_static_pad_template (gstelement_class,
       &gst_rtp_h264_depay_src_template);
@@ -124,6 +145,38 @@ gst_rtp_h264_depay_class_init (GstRtpH264DepayClass * klass)
 }
 
 static void
+gst_rtp_h264_depay_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec)
+{
+  GstRtpH264Depay *rtph264depay = GST_RTP_H264_DEPAY (object);
+
+  switch (prop_id) {
+    case PROP_DROP_SEI_NAL:
+      rtph264depay->drop_sei_nal = g_value_get_boolean (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
+}
+
+static void
+gst_rtp_h264_depay_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
+{
+  GstRtpH264Depay *rtph264depay = GST_RTP_H264_DEPAY (object);
+
+  switch (prop_id) {
+    case PROP_DROP_SEI_NAL:
+      g_value_set_boolean (value, rtph264depay->drop_sei_nal);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
+}
+
+static void
 gst_rtp_h264_depay_init (GstRtpH264Depay * rtph264depay)
 {
   rtph264depay->adapter = gst_adapter_new ();
@@ -134,6 +187,7 @@ gst_rtp_h264_depay_init (GstRtpH264Depay * rtph264depay)
       (GDestroyNotify) gst_buffer_unref);
   rtph264depay->pps = g_ptr_array_new_with_free_func (
       (GDestroyNotify) gst_buffer_unref);
+  rtph264depay->drop_sei_nal = DEFAULT_DROP_SEI_NAL;
 }
 
 static void
@@ -800,6 +854,10 @@ gst_rtp_h264_depay_handle_nal (GstRtpH264Depay * rtph264depay, GstBuffer * nal,
       gst_buffer_unmap (nal, &map);
       gst_buffer_unref (nal);
       return NULL;
+    } else if (nal_type == 6 && rtph264depay->drop_sei_nal) {   /* Drop SEI nal units */
+      gst_buffer_unmap (nal, &map);
+      gst_buffer_unref (nal);
+      return NULL;
     }
 
     if (rtph264depay->new_codec_data &&
@@ -809,6 +867,7 @@ gst_rtp_h264_depay_handle_nal (GstRtpH264Depay * rtph264depay, GstBuffer * nal,
 
 
   if (rtph264depay->merge) {
+
     gboolean start = FALSE, complete = FALSE;
 
     /* marker bit isn't mandatory so in the following code we try to guess
@@ -833,6 +892,12 @@ gst_rtp_h264_depay_handle_nal (GstRtpH264Depay * rtph264depay, GstBuffer * nal,
       } else if (nal_type >= 6 && nal_type <= 9) {
         /* SEI, SPS, PPS, AU terminate picture */
         complete = TRUE;
+        /* Drop SEI nal units */
+        if (nal_type == 6 && rtph264depay->drop_sei_nal) {
+          gst_buffer_unmap (nal, &map);
+          gst_buffer_unref (nal);
+          return NULL;
+        }
       }
       GST_DEBUG_OBJECT (depayload, "start %d, complete %d", start, complete);
 
